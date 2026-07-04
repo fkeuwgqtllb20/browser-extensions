@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "知识星球可折叠目录",
+  "description": "在知识星球文章页自动生成可折叠目录，支持点击跳转和当前章节高亮。",
+  "version": "1.0.0",
+  "content_scripts": [
+    {
+      "matches": [
+        "https://articles.zsxq.com/*",
+        "http://articles.zsxq.com/*"
+      ],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}
