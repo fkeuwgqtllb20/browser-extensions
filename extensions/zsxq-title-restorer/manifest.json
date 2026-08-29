@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "知识星球完整标题恢复",
+  "description": "在知识星球课程目录中恢复被省略的课程标题，并复制标题列表。",
+  "version": "1.0.0",
+  "permissions": ["tabs", "scripting", "clipboardWrite"],
+  "host_permissions": [
+    "https://wx.zsxq.com/*",
+    "https://t.zsxq.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://wx.zsxq.com/*"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}
