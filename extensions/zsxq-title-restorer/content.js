@@ -18,8 +18,110 @@
     return [...document.querySelectorAll(TOPIC_SELECTOR)];
   }
 
+  /**
+   * Return the text immediately before a link.  The course directory is
+   * rendered as one rich-text container, so the order marker (for example
+   * `- 16：`) is usually a text node directly before the anchor.  Using a
+   * Range also handles the case where the marker is wrapped in a span or
+   * another inline element.
+   */
+  function textBeforeLink(link) {
+    let node = link;
+    let lastText = "";
+
+    for (let depth = 0; node?.parentNode && depth < 8; depth += 1) {
+      const parent = node.parentNode;
+
+      if (typeof document.createRange === "function") {
+        try {
+          const range = document.createRange();
+          range.selectNodeContents(parent);
+          range.setEnd(node, 0);
+          const text = range.toString();
+          if (text) {
+            lastText = text.slice(-1024);
+            // A wrapped link may need the next ancestor before its marker is
+            // visible.  Stop as soon as the current range ends in a marker.
+            if (parseOrderMarker(text)) return lastText;
+          }
+        } catch {
+          // Continue with the sibling fallback below.
+        }
+      }
+
+      node = parent;
+    }
+
+    // A small fallback for browsers/test DOMs without Range support.
+    const chunks = [];
+    node = link;
+    for (let depth = 0; node?.parentNode && depth < 8; depth += 1) {
+      let sibling = node.previousSibling;
+      while (sibling) {
+        chunks.unshift(sibling.textContent || "");
+        sibling = sibling.previousSibling;
+      }
+      node = node.parentNode;
+    }
+    const fallbackText = chunks.join("").slice(-1024);
+    return parseOrderMarker(lastText) ? lastText : fallbackText || lastText;
+  }
+
+  function normalizeMarkerText(value) {
+    return String(value || "")
+      .replace(/\u00a0/g, " ")
+      .replace(/[\u200b\ufeff]/g, "")
+      .replace(/\r\n?/g, "\n");
+  }
+
+  function parseOrderMarker(value) {
+    const text = normalizeMarkerText(value);
+
+    // Normal directory rows start on their own line: "- 16：".
+    let match = text.match(/(?:^|\n)\s*(?:[-*•－]\s*)?(\d+)\s*([:：])\s*$/);
+    // Some rows have an inline note before the marker, e.g. "... - 30：".
+    if (!match) {
+      match = text.match(/(?:^|[ \t])[-－–—]\s*(\d+)\s*([:：])\s*$/);
+    }
+
+    return match ? { number: match[1], separator: match[2] } : null;
+  }
+
+  function getOrder(link) {
+    // The learning number is rendered outside the anchor; never infer it
+    // from the chapter number contained in the title.
+    return parseOrderMarker(textBeforeLink(link));
+  }
+
   function getTitle(link) {
-    return (link.textContent || decodeTitle(link.getAttribute("title"))).replace(/\s+/g, " ").trim();
+    const restoredTitle = link.dataset.zsxqFullTitle;
+    if (restoredTitle) return restoredTitle.replace(/\s+/g, " ").trim();
+    return (link.textContent || decodeTitle(link.getAttribute("title")))
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function getCopyItems() {
+    const entries = getLinks()
+      .map((link) => ({ link, title: getTitle(link), order: getOrder(link) }))
+      .filter((entry) => entry.title);
+    return entries;
+  }
+
+  function uniqueCopyItems(items) {
+    const seen = new Set();
+    return items.filter((item) => {
+      const order = item.order?.number || "";
+      const key = `${order}\u0000${item.title}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+
+  function formatCopyItem(item) {
+    if (!item.order) return item.title;
+    return `- ${item.order.number}${item.order.separator} ${item.title}`;
   }
 
   function setStatus(text, kind = "") {
@@ -55,8 +157,8 @@
   }
 
   async function copyTitles() {
-    const titles = getLinks().map(getTitle).filter(Boolean);
-    const result = [...new Set(titles)].join("\n");
+    const items = uniqueCopyItems(getCopyItems());
+    const result = items.map(formatCopyItem).join("\n");
 
     if (!result) {
       setStatus("当前页面没有可复制的课程标题。", "error");
@@ -75,7 +177,13 @@
       textarea.remove();
     }
 
-    setStatus(`已复制 ${titles.length} 条标题。`, "success");
+    const hasOrder = items.some((item) => item.order);
+    setStatus(
+      hasOrder
+        ? `已复制 ${items.length} 条课程标题（含学习序号，未标号条目已保留）。`
+        : `已复制 ${items.length} 条标题。`,
+      "success"
+    );
   }
 
   async function restoreTitles() {
@@ -98,7 +206,7 @@
 
     const uniqueItems = [...unresolved.values()];
 
-    if (!uniqueItems.length) {
+    if (!links.length) {
       setStatus("当前页面没有课程链接，请先打开课程目录。", "error");
       return;
     }
@@ -140,10 +248,10 @@
       <p data-role="status">等待处理当前页面课程目录。</p>
       <div class="zsxq-title-restorer__actions">
         <button type="button" data-action="restore">恢复完整标题</button>
-        <button type="button" data-action="copy">复制当前标题</button>
+        <button type="button" data-action="copy">复制标题（含序号）</button>
         <button type="button" data-action="cancel" hidden>停止</button>
       </div>
-      <small>仅创建一个后台标签页，完成后会自动关闭。</small>
+      <small>复制时保留链接前的学习序号；未标号条目也会保留。仅创建一个后台标签页，完成后自动关闭。</small>
     `;
     document.documentElement.appendChild(panel);
 
@@ -180,7 +288,7 @@
       } else if (message.cancelled) {
         setStatus(`已停止：成功恢复 ${restoredCount} 条。`, "error");
       } else {
-        setStatus(`完成：恢复 ${restoredCount} 条，失败 ${failedCount} 条。请点击“复制当前标题”。`, "success");
+        setStatus(`完成：恢复 ${restoredCount} 条，失败 ${failedCount} 条。请点击“复制标题（含序号）”。`, "success");
       }
     }
   });
