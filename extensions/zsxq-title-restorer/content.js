@@ -5,6 +5,10 @@
   let restoring = false;
   let restoredCount = 0;
   let failedCount = 0;
+  let activeTask = "";
+  let m3u8Results = [];
+  let m3u8FailureCount = 0;
+  let m3u8MissingCount = 0;
 
   function decodeTitle(value) {
     try {
@@ -124,6 +128,208 @@
     return `- ${item.order.number}${item.order.separator} ${item.title}`;
   }
 
+  function normalizeLookupTitle(value) {
+    return String(value || "")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function parseTitleLines(value) {
+    return String(value || "")
+      .split(/\r?\n/)
+      .map((line) => line.split(/\t/, 1)[0].trim())
+      .map((line) => {
+        const numbered = line.match(/^\s*[-*•－–—]\s*(\d+)\s*([:：])\s*(.+)$/);
+        if (numbered) {
+          return {
+            title: normalizeLookupTitle(numbered[3]),
+            order: { number: numbered[1], separator: numbered[2] },
+          };
+        }
+
+        const bareNumber = line.match(/^\s*(\d+)\s*([:：])\s*(.+)$/);
+        const unnumbered = bareNumber
+          ? bareNumber[3]
+          : line.replace(/^\s*[-*•－–—]\s+/, "");
+        return {
+          title: normalizeLookupTitle(unnumbered),
+          order: bareNumber
+            ? { number: bareNumber[1], separator: bareNumber[2] }
+            : null,
+        };
+      })
+      .filter((item) => item.title);
+  }
+
+  function titleMatchKey(value) {
+    return normalizeLookupTitle(value)
+      .replace(/[.…]+$/g, "")
+      .trim();
+  }
+
+  function likelyVideoItems(items) {
+    const likely = items.filter(
+      (item) =>
+        item.order ||
+        /《[^》]+》/.test(item.title) ||
+        /第\s*[\d一二三四五六七八九十百]+(?:\s*[-－—]\s*[\d一二三四五六七八九十百]+)?\s*节/.test(item.title)
+    );
+    return likely.length ? likely : items;
+  }
+
+  function currentTopicTitle() {
+    const content = [...document.querySelectorAll(".content")].find((element) =>
+      element.querySelector(TOPIC_SELECTOR)
+    );
+    const heading =
+      content?.querySelector("strong")?.textContent ||
+      content?.querySelector("h1,h2")?.textContent ||
+      document.title.replace(/\s*[-–—]\s*知识星球\s*$/, "");
+    return normalizeLookupTitle(heading);
+  }
+
+  function currentTopicVideoItem() {
+    if (!/\/topic\//.test(location.pathname)) return null;
+
+    const hasDirectVideo = Boolean(document.querySelector("video[data-src]"));
+    const content = [...document.querySelectorAll(".content")].find((element) =>
+      element.querySelector(TOPIC_SELECTOR)
+    );
+    const title = currentTopicTitle();
+
+    if (hasDirectVideo && title) {
+      return {
+        link: null,
+        url: location.href,
+        title,
+        order: null,
+        direct: true,
+      };
+    }
+
+    const link = [...(content || document).querySelectorAll(TOPIC_SELECTOR)].find(
+      (candidate) =>
+        /课程视频/.test(textBeforeLink(candidate).slice(-100)) &&
+        /第\s*[\d一二三四五六七八九十百]+(?:\s*[-－—]\s*[\d一二三四五六七八九十百]+)?\s*节/.test(
+          getTitle(candidate)
+        )
+    );
+    if (!link || !title) return null;
+
+    return {
+      link,
+      url: link.href,
+      title,
+      order: null,
+      direct: false,
+    };
+  }
+
+  function mergeItemsByUrl(items) {
+    const merged = new Map();
+    for (const item of items) {
+      if (!item.url) continue;
+      const existing = merged.get(item.url);
+      if (!existing) {
+        merged.set(item.url, item);
+        continue;
+      }
+
+      if (item.title.length > existing.title.length) existing.title = item.title;
+      if (!existing.order && item.order) existing.order = item.order;
+    }
+    return [...merged.values()];
+  }
+
+  function getM3u8Items() {
+    const rawEntries = getCopyItems().map((item) => ({
+      ...item,
+      url: item.link.href,
+    }));
+    const currentItem = currentTopicVideoItem();
+    const entries = mergeItemsByUrl(currentItem ? [...rawEntries, currentItem] : rawEntries);
+    const input =
+      document.querySelector("#" + PANEL_ID + " [data-role='m3u8-input']")?.value || "";
+
+    if (!input.trim() && currentItem?.direct) {
+      return { items: [currentItem], missing: [] };
+    }
+
+    if (!input.trim()) {
+      return { items: likelyVideoItems(entries), missing: [] };
+    }
+
+    const requested = parseTitleLines(input);
+    const usedUrls = new Set();
+    const items = [];
+    const missing = [];
+
+    for (const request of requested) {
+      const requestedKey = titleMatchKey(request.title);
+      let match = entries.find(
+        (entry) =>
+          !usedUrls.has(entry.url) && titleMatchKey(entry.title) === requestedKey
+      );
+
+      if (!match) {
+        const partialMatches = entries.filter(
+          (entry) =>
+            !usedUrls.has(entry.url) &&
+            (titleMatchKey(entry.title).startsWith(requestedKey) ||
+              requestedKey.startsWith(titleMatchKey(entry.title)))
+        );
+        if (partialMatches.length === 1) match = partialMatches[0];
+      }
+
+      if (!match) {
+        missing.push(request.title);
+        continue;
+      }
+
+      usedUrls.add(match.url);
+      items.push({
+        ...match,
+        order: match.order || request.order,
+      });
+    }
+
+    return { items, missing };
+  }
+
+  async function writeClipboard(value) {
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error("浏览器不支持剪贴板 API");
+      let timeoutId;
+      try {
+        await Promise.race([
+          navigator.clipboard.writeText(value),
+          new Promise((_, reject) => {
+            timeoutId = window.setTimeout(
+              () => reject(new Error("剪贴板写入超时")),
+              2000
+            );
+          }),
+        ]);
+      } finally {
+        window.clearTimeout(timeoutId);
+      }
+      return;
+    } catch {
+      const textarea = document.createElement("textarea");
+      textarea.value = value;
+      textarea.style.cssText = "position:fixed;left:-9999px;top:-9999px;";
+      document.body.appendChild(textarea);
+      textarea.select();
+      try {
+        if (!document.execCommand("copy")) {
+          throw new Error("无法写入剪贴板");
+        }
+      } finally {
+        textarea.remove();
+      }
+    }
+  }
+
   function setStatus(text, kind = "") {
     const status = document.querySelector(`#${PANEL_ID} [data-role='status']`);
     if (!status) return;
@@ -131,12 +337,27 @@
     status.dataset.kind = kind;
   }
 
-  function setBusy(busy) {
+  function updateM3u8CopyButton() {
+    const button = document.querySelector(
+      "#" + PANEL_ID + " [data-action='copy-m3u8']"
+    );
+    if (button) button.disabled = restoring || !m3u8Results.length;
+  }
+
+  function setBusy(busy, task = "") {
     restoring = busy;
+    activeTask = busy ? task : "";
     const restoreButton = document.querySelector(`#${PANEL_ID} [data-action='restore']`);
+    const copyButton = document.querySelector(`#${PANEL_ID} [data-action='copy']`);
+    const extractButton = document.querySelector(`#${PANEL_ID} [data-action='extract-m3u8']`);
+    const input = document.querySelector(`#${PANEL_ID} [data-role='m3u8-input']`);
     const cancelButton = document.querySelector(`#${PANEL_ID} [data-action='cancel']`);
     if (restoreButton) restoreButton.disabled = busy;
+    if (copyButton) copyButton.disabled = busy;
+    if (extractButton) extractButton.disabled = busy;
+    if (input) input.disabled = busy;
     if (cancelButton) cancelButton.hidden = !busy;
+    updateM3u8CopyButton();
   }
 
   function revealLink(link, title) {
@@ -166,15 +387,13 @@
     }
 
     try {
-      await navigator.clipboard.writeText(result);
-    } catch {
-      const textarea = document.createElement("textarea");
-      textarea.value = result;
-      textarea.style.cssText = "position:fixed;left:-9999px;top:-9999px;";
-      document.body.appendChild(textarea);
-      textarea.select();
-      document.execCommand("copy");
-      textarea.remove();
+      await writeClipboard(result);
+    } catch (reason) {
+      setStatus(
+        "复制失败：" + (reason instanceof Error ? reason.message : String(reason)),
+        "error"
+      );
+      return;
     }
 
     const hasOrder = items.some((item) => item.order);
@@ -184,6 +403,29 @@
         : `已复制 ${items.length} 条标题。`,
       "success"
     );
+  }
+
+  async function copyM3u8Results() {
+    if (!m3u8Results.length) {
+      setStatus("当前没有可复制的 m3u8 结果。", "error");
+      return;
+    }
+
+    const result = m3u8Results
+      .map((item) => formatCopyItem(item) + "\t" + item.m3u8)
+      .join("\n");
+
+    try {
+      await writeClipboard(result);
+    } catch (reason) {
+      setStatus(
+        "复制失败：" + (reason instanceof Error ? reason.message : String(reason)),
+        "error"
+      );
+      return;
+    }
+
+    setStatus("已复制 " + m3u8Results.length + " 条 m3u8 链接。", "success");
   }
 
   async function restoreTitles() {
@@ -219,7 +461,7 @@
       return;
     }
 
-    setBusy(true);
+    setBusy(true, "restore");
     setStatus(`已直接恢复 ${restoredCount} 条；正在后台恢复 0/${uniqueItems.length} 条…`);
 
     try {
@@ -230,8 +472,57 @@
     }
   }
 
-  function cancelRestore() {
-    chrome.runtime.sendMessage({ type: "CANCEL_RESTORE" });
+  async function extractM3u8Links() {
+    if (restoring) return;
+
+    const selection = getM3u8Items();
+    m3u8Results = [];
+    m3u8MissingCount = selection.missing.length;
+    m3u8FailureCount = 0;
+    updateM3u8CopyButton();
+
+    if (!selection.items.length) {
+      setStatus(
+        selection.missing.length
+          ? "未找到可处理的第一层课程链接（未匹配 " + selection.missing.length + " 条标题）。"
+          : "当前页面没有可处理的课程链接。",
+        "error"
+      );
+      return;
+    }
+
+    setBusy(true, "m3u8");
+    const missingHint = selection.missing.length
+      ? "，另有 " + selection.missing.length + " 条标题未匹配"
+      : "";
+    setStatus(
+      "正在提取视频链接 0/" + selection.items.length + " 条" + missingHint + "…"
+    );
+
+    try {
+      await chrome.runtime.sendMessage({
+        type: "START_M3U8",
+        items: selection.items.map((item) => ({
+          url: item.url,
+          title: item.title,
+          order: item.order || null,
+        })),
+      });
+    } catch (reason) {
+      setBusy(false);
+      setStatus(
+        "视频链接提取启动失败：" +
+          (reason instanceof Error ? reason.message : String(reason)),
+        "error"
+      );
+    }
+  }
+
+  function cancelTask() {
+    if (!activeTask) return;
+    chrome.runtime.sendMessage({
+      type: activeTask === "m3u8" ? "CANCEL_M3U8" : "CANCEL_RESTORE",
+    });
     setStatus("正在停止…");
   }
 
@@ -246,25 +537,35 @@
         <button type="button" data-action="minimize" title="收起">−</button>
       </div>
       <p data-role="status">等待处理当前页面课程目录。</p>
+      <label class="zsxq-title-restorer__label" for="zsxq-title-restorer-m3u8-input">
+        标题列表（可选）
+      </label>
+      <textarea id="zsxq-title-restorer-m3u8-input" data-role="m3u8-input" rows="4" placeholder="粘贴标题列表；留空则处理当前页面课程链接"></textarea>
       <div class="zsxq-title-restorer__actions">
         <button type="button" data-action="restore">恢复完整标题</button>
         <button type="button" data-action="copy">复制标题（含序号）</button>
+        <button type="button" data-action="extract-m3u8">提取 m3u8</button>
+        <button type="button" data-action="copy-m3u8" disabled>复制 m3u8 结果</button>
         <button type="button" data-action="cancel" hidden>停止</button>
       </div>
-      <small>复制时保留链接前的学习序号；未标号条目也会保留。仅创建一个后台标签页，完成后自动关闭。</small>
+      <small>可粘贴带序号标题；提取会依次经过第一层和第二层页面。m3u8 链接带时效 token，请及时保存。</small>
     `;
     document.documentElement.appendChild(panel);
 
     panel.querySelector("[data-action='restore']").addEventListener("click", restoreTitles);
     panel.querySelector("[data-action='copy']").addEventListener("click", copyTitles);
-    panel.querySelector("[data-action='cancel']").addEventListener("click", cancelRestore);
+    panel.querySelector("[data-action='extract-m3u8']").addEventListener("click", extractM3u8Links);
+    panel.querySelector("[data-action='copy-m3u8']").addEventListener("click", copyM3u8Results);
+    panel.querySelector("[data-action='cancel']").addEventListener("click", cancelTask);
     panel.querySelector("[data-action='minimize']").addEventListener("click", () => {
       panel.classList.toggle("is-minimized");
     });
+    updateM3u8CopyButton();
   }
 
   chrome.runtime.onMessage.addListener((message) => {
     if (message?.type === "RESTORE_PROGRESS") {
+      if (activeTask !== "restore") return;
       if (message.title) {
         getLinks()
           .filter((link) => link.href === message.url)
@@ -282,6 +583,7 @@
     }
 
     if (message?.type === "RESTORE_FINISHED") {
+      if (activeTask !== "restore") return;
       setBusy(false);
       if (message.error) {
         setStatus(`处理失败：${message.error}`, "error");
@@ -289,6 +591,71 @@
         setStatus(`已停止：成功恢复 ${restoredCount} 条。`, "error");
       } else {
         setStatus(`完成：恢复 ${restoredCount} 条，失败 ${failedCount} 条。请点击“复制标题（含序号）”。`, "success");
+      }
+      return;
+    }
+
+    if (message?.type === "M3U8_PROGRESS") {
+      if (activeTask !== "m3u8") return;
+
+      if (message.m3u8) {
+        m3u8Results.push({
+          title: normalizeLookupTitle(message.title),
+          order: message.order || null,
+          m3u8: String(message.m3u8).trim(),
+          sourceUrl: message.sourceUrl || "",
+        });
+      } else {
+        m3u8FailureCount += 1;
+      }
+
+      updateM3u8CopyButton();
+      setStatus(
+        "视频链接提取：" +
+          message.current +
+          "/" +
+          message.total +
+          "（成功 " +
+          m3u8Results.length +
+          "，失败 " +
+          m3u8FailureCount +
+          "）",
+        message.error ? "error" : ""
+      );
+      return;
+    }
+
+    if (message?.type === "M3U8_FINISHED") {
+      if (activeTask !== "m3u8") return;
+
+      setBusy(false);
+      if (message.error) {
+        setStatus("视频链接提取失败：" + message.error, "error");
+      } else if (message.cancelled) {
+        const totalFailed = m3u8FailureCount + m3u8MissingCount;
+        setStatus(
+          "已停止：成功提取 " +
+            m3u8Results.length +
+            " 条，失败 " +
+            totalFailed +
+            " 条。",
+          "error"
+        );
+      } else {
+        const missingHint = m3u8MissingCount
+          ? "，未匹配 " + m3u8MissingCount + " 条标题"
+          : "";
+        const totalFailed = m3u8FailureCount + m3u8MissingCount;
+        setStatus(
+          "完成：成功提取 " +
+            m3u8Results.length +
+            " 条，失败 " +
+            totalFailed +
+            " 条" +
+            missingHint +
+            "。可点击“复制 m3u8 结果”。",
+          m3u8Results.length ? "success" : "error"
+        );
       }
     }
   });
