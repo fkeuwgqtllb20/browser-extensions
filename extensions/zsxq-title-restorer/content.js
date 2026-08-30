@@ -10,12 +10,130 @@
   let m3u8FailureCount = 0;
   let m3u8MissingCount = 0;
 
-  function decodeTitle(value) {
-    try {
-      return decodeURIComponent(value || "").trim();
-    } catch {
-      return String(value || "").trim();
+  // Titles can arrive from rich-text/API responses with HTML entities (for
+  // example `&amp;`).  Keep a small decoder with a DOM-independent fallback so
+  // the value used for display, matching, and copying is always canonical.  A
+  // few passes also handle values that were encoded more than once, such as
+  // `&amp;amp;`.
+  const HTML_ENTITY_NAMES = Object.freeze({
+    amp: "&",
+    lt: "<",
+    gt: ">",
+    quot: '"',
+    apos: "'",
+    nbsp: "\u00a0",
+    ensp: "\u2002",
+    emsp: "\u2003",
+    thinsp: "\u2009",
+    ndash: "–",
+    mdash: "—",
+    hellip: "…",
+    laquo: "«",
+    raquo: "»",
+    lsquo: "‘",
+    rsquo: "’",
+    ldquo: "“",
+    rdquo: "”",
+    bull: "•",
+    middot: "·",
+    copy: "©",
+    reg: "®",
+    trade: "™",
+    times: "×",
+    divide: "÷",
+    plusmn: "±",
+    minus: "−",
+    deg: "°",
+    euro: "€",
+    pound: "£",
+    yen: "¥",
+    cent: "¢",
+    sect: "§",
+    para: "¶",
+  });
+  const HTML_ENTITY_PATTERN =
+    /&(#(?:x[\da-f]+|\d+)|[a-z][a-z\d]+);/gi;
+  let htmlEntityDecoder;
+
+  function decodeHtmlEntities(value) {
+    let text = String(value ?? "");
+    for (let pass = 0; pass < 3; pass += 1) {
+      const source = text;
+      let decoded = source.replace(HTML_ENTITY_PATTERN, (entity, body) => {
+        const normalizedBody = body.toLowerCase();
+        if (normalizedBody.startsWith("#x")) {
+          const codePoint = Number.parseInt(normalizedBody.slice(2), 16);
+          if (
+            Number.isInteger(codePoint) &&
+            codePoint >= 0 &&
+            codePoint <= 0x10ffff &&
+            !(codePoint >= 0xd800 && codePoint <= 0xdfff)
+          ) {
+            return String.fromCodePoint(codePoint);
+          }
+          return entity;
+        }
+        if (normalizedBody.startsWith("#")) {
+          const codePoint = Number.parseInt(normalizedBody.slice(1), 10);
+          if (
+            Number.isInteger(codePoint) &&
+            codePoint >= 0 &&
+            codePoint <= 0x10ffff &&
+            !(codePoint >= 0xd800 && codePoint <= 0xdfff)
+          ) {
+            return String.fromCodePoint(codePoint);
+          }
+          return entity;
+        }
+        return Object.prototype.hasOwnProperty.call(
+          HTML_ENTITY_NAMES,
+          normalizedBody
+        )
+          ? HTML_ENTITY_NAMES[normalizedBody]
+          : entity;
+      });
+
+      // The map above covers the entities most often emitted by the site.
+      // Use the browser's HTML parser as a fallback for less common named
+      // entities (for example `&colon;`) while escaping literal angle brackets
+      // so a title is never interpreted as markup.
+      if (
+        source.includes("&") &&
+        typeof document !== "undefined" &&
+        typeof document.createElement === "function"
+      ) {
+        try {
+          htmlEntityDecoder ||= document.createElement("textarea");
+          htmlEntityDecoder.innerHTML = source
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;");
+          const parsed = htmlEntityDecoder.value;
+          // Prefer the browser parser for complete HTML5 entity coverage;
+          // retain the manual result if a non-standard test DOM did not parse.
+          if (
+            typeof parsed === "string" &&
+            (parsed !== source || decoded === source)
+          ) {
+            decoded = parsed;
+          }
+        } catch {
+          // Keep the DOM-independent result when the fallback is unavailable.
+        }
+      }
+      if (decoded === text) break;
+      text = decoded;
     }
+    return text;
+  }
+
+  function decodeTitle(value) {
+    let text = String(value ?? "");
+    try {
+      text = decodeURIComponent(text);
+    } catch {
+      // Keep the original text when it contains a malformed URI escape.
+    }
+    return decodeHtmlEntities(text).trim();
   }
 
   function getLinks() {
@@ -72,7 +190,7 @@
   }
 
   function normalizeMarkerText(value) {
-    return String(value || "")
+    return decodeHtmlEntities(String(value || ""))
       .replace(/\u00a0/g, " ")
       .replace(/[\u200b\ufeff]/g, "")
       .replace(/\r\n?/g, "\n");
@@ -99,10 +217,10 @@
 
   function getTitle(link) {
     const restoredTitle = link.dataset.zsxqFullTitle;
-    if (restoredTitle) return restoredTitle.replace(/\s+/g, " ").trim();
-    return (link.textContent || decodeTitle(link.getAttribute("title")))
-      .replace(/\s+/g, " ")
-      .trim();
+    if (restoredTitle) return normalizeLookupTitle(restoredTitle);
+    return normalizeLookupTitle(
+      link.textContent || decodeTitle(link.getAttribute("title"))
+    );
   }
 
   function getCopyItems() {
@@ -129,7 +247,7 @@
   }
 
   function normalizeLookupTitle(value) {
-    return String(value || "")
+    return decodeHtmlEntities(String(value || ""))
       .replace(/\s+/g, " ")
       .trim();
   }
@@ -137,7 +255,7 @@
   function parseTitleLines(value) {
     return String(value || "")
       .split(/\r?\n/)
-      .map((line) => line.split(/\t/, 1)[0].trim())
+      .map((line) => decodeHtmlEntities(line.split(/\t/, 1)[0]).trim())
       .map((line) => {
         const numbered = line.match(/^\s*[-*•－–—]\s*(\d+)\s*([:：])\s*(.+)$/);
         if (numbered) {
@@ -361,9 +479,10 @@
   }
 
   function revealLink(link, title) {
-    link.textContent = title;
-    link.title = title;
-    link.dataset.zsxqFullTitle = title;
+    const normalizedTitle = normalizeLookupTitle(title);
+    link.textContent = normalizedTitle;
+    link.title = normalizedTitle;
+    link.dataset.zsxqFullTitle = normalizedTitle;
 
     let node = link;
     for (let level = 0; node && level < 5; level += 1, node = node.parentElement) {

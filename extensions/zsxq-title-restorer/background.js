@@ -6,12 +6,103 @@ const TITLE_RETRY_DELAY_MS = 350;
 const VIDEO_PAGE_TIMEOUT_MS = 20_000;
 const VIDEO_RETRY_DELAY_MS = 400;
 
+// Knowledge Star pages occasionally expose titles as HTML-escaped text.  Do
+// not let the escaped representation leak into the title used for matching or
+// copied to the downloader.  This decoder is intentionally DOM-independent
+// because the background service worker has no document object.  Multiple
+// passes handle double-encoded values such as `&amp;amp;`.
+const HTML_ENTITY_NAMES = Object.freeze({
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+  nbsp: "\u00a0",
+  ensp: "\u2002",
+  emsp: "\u2003",
+  thinsp: "\u2009",
+  ndash: "–",
+  mdash: "—",
+  hellip: "…",
+  laquo: "«",
+  raquo: "»",
+  lsquo: "‘",
+  rsquo: "’",
+  ldquo: "“",
+  rdquo: "”",
+  bull: "•",
+  middot: "·",
+  copy: "©",
+  reg: "®",
+  trade: "™",
+  times: "×",
+  divide: "÷",
+  plusmn: "±",
+  minus: "−",
+  deg: "°",
+  euro: "€",
+  pound: "£",
+  yen: "¥",
+  cent: "¢",
+  sect: "§",
+  para: "¶",
+});
+const HTML_ENTITY_PATTERN = /&(#(?:x[\da-f]+|\d+)|[a-z][a-z\d]+);/gi;
+
+function decodeHtmlEntities(value) {
+  let text = String(value ?? "");
+  for (let pass = 0; pass < 3; pass += 1) {
+    const decoded = text.replace(HTML_ENTITY_PATTERN, (entity, body) => {
+      const normalizedBody = body.toLowerCase();
+      if (normalizedBody.startsWith("#x")) {
+        const codePoint = Number.parseInt(normalizedBody.slice(2), 16);
+        if (
+          Number.isInteger(codePoint) &&
+          codePoint >= 0 &&
+          codePoint <= 0x10ffff &&
+          !(codePoint >= 0xd800 && codePoint <= 0xdfff)
+        ) {
+          return String.fromCodePoint(codePoint);
+        }
+        return entity;
+      }
+      if (normalizedBody.startsWith("#")) {
+        const codePoint = Number.parseInt(normalizedBody.slice(1), 10);
+        if (
+          Number.isInteger(codePoint) &&
+          codePoint >= 0 &&
+          codePoint <= 0x10ffff &&
+          !(codePoint >= 0xd800 && codePoint <= 0xdfff)
+        ) {
+          return String.fromCodePoint(codePoint);
+        }
+        return entity;
+      }
+      return Object.prototype.hasOwnProperty.call(
+        HTML_ENTITY_NAMES,
+        normalizedBody
+      )
+        ? HTML_ENTITY_NAMES[normalizedBody]
+        : entity;
+    });
+    if (decoded === text) break;
+    text = decoded;
+  }
+  return text;
+}
+
+function normalizeTitle(title) {
+  return decodeHtmlEntities(String(title ?? ""))
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function sleep(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 function cleanTitle(title) {
-  return String(title || "")
+  return normalizeTitle(title)
     .replace(/\s*[-–—]\s*知识星球\s*$/, "")
     .trim();
 }
@@ -27,7 +118,32 @@ async function sendToPage(tabId, message) {
 async function titleFromTab(tabId) {
   const [injected] = await chrome.scripting.executeScript({
     target: { tabId },
-    func: () => ({ href: location.href, title: document.title }),
+    func: () => {
+      const decoder =
+        typeof document !== "undefined" &&
+        typeof document.createElement === "function"
+          ? document.createElement("textarea")
+          : null;
+      const decodeEntities = (value) => {
+        let text = String(value ?? "");
+        if (!decoder) return text;
+        for (let pass = 0; pass < 3; pass += 1) {
+          try {
+            decoder.innerHTML = text
+              .replace(/</g, "&lt;")
+              .replace(/>/g, "&gt;");
+          } catch {
+            return text;
+          }
+          const decoded = decoder.value;
+          if (typeof decoded !== "string") return text;
+          if (decoded === text) break;
+          text = decoded;
+        }
+        return text;
+      };
+      return { href: location.href, title: decodeEntities(document.title) };
+    },
   });
   return injected?.result || { href: "", title: "" };
 }
@@ -82,7 +198,100 @@ async function inspectVideoPage(tabId) {
   const [injected] = await chrome.scripting.executeScript({
     target: { tabId },
     func: () => {
-      const clean = (value) => String(value || "").replace(/\s+/g, " ").trim();
+      const entityNames = {
+        amp: "&",
+        lt: "<",
+        gt: ">",
+        quot: '"',
+        apos: "'",
+        nbsp: "\u00a0",
+        ensp: "\u2002",
+        emsp: "\u2003",
+        thinsp: "\u2009",
+        ndash: "–",
+        mdash: "—",
+        hellip: "…",
+        laquo: "«",
+        raquo: "»",
+        lsquo: "‘",
+        rsquo: "’",
+        ldquo: "“",
+        rdquo: "”",
+        bull: "•",
+        middot: "·",
+        copy: "©",
+        reg: "®",
+        trade: "™",
+        times: "×",
+        divide: "÷",
+        plusmn: "±",
+        minus: "−",
+        deg: "°",
+        euro: "€",
+        pound: "£",
+        yen: "¥",
+        cent: "¢",
+        sect: "§",
+        para: "¶",
+      };
+      const entityPattern = /&(#(?:x[\da-f]+|\d+)|[a-z][a-z\d]+);/gi;
+      const entityDecoder =
+        typeof document !== "undefined" &&
+        typeof document.createElement === "function"
+          ? document.createElement("textarea")
+          : null;
+      const decodeEntities = (value) => {
+        let text = String(value ?? "");
+        for (let pass = 0; pass < 3; pass += 1) {
+          const source = text;
+          let decoded = source.replace(entityPattern, (entity, body) => {
+            const normalizedBody = body.toLowerCase();
+            if (normalizedBody.startsWith("#x")) {
+              const codePoint = Number.parseInt(normalizedBody.slice(2), 16);
+              return Number.isInteger(codePoint) &&
+                codePoint >= 0 &&
+                codePoint <= 0x10ffff &&
+                !(codePoint >= 0xd800 && codePoint <= 0xdfff)
+                ? String.fromCodePoint(codePoint)
+                : entity;
+            }
+            if (normalizedBody.startsWith("#")) {
+              const codePoint = Number.parseInt(normalizedBody.slice(1), 10);
+              return Number.isInteger(codePoint) &&
+                codePoint >= 0 &&
+                codePoint <= 0x10ffff &&
+                !(codePoint >= 0xd800 && codePoint <= 0xdfff)
+                ? String.fromCodePoint(codePoint)
+                : entity;
+            }
+            return Object.prototype.hasOwnProperty.call(entityNames, normalizedBody)
+              ? entityNames[normalizedBody]
+              : entity;
+          });
+
+          if (entityDecoder && source.includes("&")) {
+            try {
+              entityDecoder.innerHTML = source
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;");
+              const parsed = entityDecoder.value;
+              if (
+                typeof parsed === "string" &&
+                (parsed !== source || decoded === source)
+              ) {
+                decoded = parsed;
+              }
+            } catch {
+              // Keep the manual decoder result if the parser is unavailable.
+            }
+          }
+          if (decoded === text) break;
+          text = decoded;
+        }
+        return text;
+      };
+      const clean = (value) =>
+        decodeEntities(String(value ?? "")).replace(/\s+/g, " ").trim();
       const chapterPattern =
         /第\s*[\d一二三四五六七八九十百]+(?:\s*[-－—]\s*[\d一二三四五六七八九十百]+)?\s*节/;
       const videos = [...document.querySelectorAll("video")];
@@ -135,7 +344,7 @@ async function inspectVideoPage(tabId) {
 
       return {
         href: location.href,
-        title: document.title,
+        title: clean(document.title),
         m3u8,
         videoLink: candidates[0]?.href || "",
         videoLinkScore: candidates[0]?.score || 0,
@@ -232,9 +441,19 @@ async function extractM3u8ForItem(tabId, item, signal) {
 }
 
 async function startM3u8Extract(sourceTabId, rawItems) {
-  const items = rawItems.filter(
-    (item) => item && isTopicUrl(item.url) && typeof item.title === "string" && item.title.trim()
-  );
+  const items = rawItems
+    .map((item) =>
+      item && typeof item === "object"
+        ? { ...item, title: normalizeTitle(item.title) }
+        : item
+    )
+    .filter(
+      (item) =>
+        item &&
+        isTopicUrl(item.url) &&
+        typeof item.title === "string" &&
+        item.title.trim()
+    );
 
   if (!items.length) {
     await sendToPage(sourceTabId, {
