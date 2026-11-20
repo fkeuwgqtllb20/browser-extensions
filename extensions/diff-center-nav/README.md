@@ -69,4 +69,16 @@ diff-center-nav/
   content.js      双栏渲染、联动滚动、导航、放大对话框
   content.css     双栏布局与高亮样式
   README.md
+  *.html          示例比对报告（测试样本，扩展不会读取它们）
 ```
+
+## 示例报告
+
+目录下附带两份 Beyond Compare 导出的比对报告，用于验证效果和回归测试：
+
+| 文件 | 特点 |
+| --- | --- |
+| `AddRelationUUSVC...比对报告.html` | 40KB / 67 行，2 处差异，便于快速查看 |
+| `IEnterpriseFusionOpenUtil...比对报告.html` | 5MB / 5042 行，16 处差异，长代码行把表格撑到 16442px，用于验证大文件性能与两侧对齐 |
+
+在 Chrome 里直接打开任一文件即可试用。它们只是输入样本，扩展运行时不依赖这些文件。

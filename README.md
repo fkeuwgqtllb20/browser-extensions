@@ -79,4 +79,5 @@ extensions/
     content.js
     content.css
     README.md
+    *.html          # 示例比对报告（测试样本）
 ```
