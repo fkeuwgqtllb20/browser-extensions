@@ -142,14 +142,18 @@
     const total = widths.reduce((sum, width) => sum + width, 0);
     if (!total) return;
 
+    // 必须用绝对像素并显式锁定表格总宽：
+    // 百分比列宽配 table-layout:fixed 会让整表收缩到视口宽，
+    // 在超宽报告（列宽上千 px）上会把内容压扁。
     const colgroup = document.createElement('colgroup');
     colgroup.className = 'bcdn-cols';
     widths.forEach(width => {
       const col = document.createElement('col');
-      col.style.width = `${((width / total) * 100).toFixed(4)}%`;
+      col.style.width = `${Math.round(width)}px`;
       colgroup.appendChild(col);
     });
     table.insertBefore(colgroup, table.firstChild);
+    table.style.width = `${Math.round(total)}px`;
     table.style.tableLayout = 'fixed';
   }
 
@@ -157,6 +161,7 @@
     if (!table) return;
     table.querySelector('colgroup.bcdn-cols')?.remove();
     table.style.tableLayout = '';
+    table.style.width = '';
   }
 
   function collapseRun(rows) {

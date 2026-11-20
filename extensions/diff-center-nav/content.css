@@ -216,9 +216,10 @@ table.fc.bcdn-table tr.bcdn-collapsed-row > td:hover {
   background: #e0e7ff;
 }
 
-table.fc.bcdn-table td {
-  word-break: break-word;
-}
+/* 注意：不要给报告表格的 td 设置 word-break / overflow-wrap。
+   原报告靠内容不换行 + 页面横向滚动来保持左右对齐，
+   一旦允许在任意位置断词，浏览器会按可换行重新计算列宽，
+   把长代码行压成一团，行号也会显示不全（10 变成 1）。 */
 
 /* ===== 差异对照对话框 ===== */
 #bcdn-modal,
