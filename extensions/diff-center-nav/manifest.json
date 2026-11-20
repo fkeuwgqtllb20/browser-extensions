@@ -1,11 +1,25 @@
 {
   "manifest_version": 3,
-  "name": "比对报告差异居中导航",
-  "description": "识别 Beyond Compare HTML 比对报告左右两侧差异，居中显示差异，并支持上一个/下一个差异快速跳转。",
-  "version": "1.1.0",
+  "name": "比对报告差异导航 - Beyond Compare 双栏对照",
+  "short_name": "差异导航",
+  "description": "把 Beyond Compare 导出的 HTML 比对报告重排为左右双栏对照视图，两侧联动滚动，支持差异跳转、仅看差异与放大对照。",
+  "version": "2.0.0",
+  "icons": {
+    "16": "icons/icon16.png",
+    "24": "icons/icon24.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "64": "icons/icon64.png",
+    "128": "icons/icon128.png"
+  },
   "permissions": ["scripting", "activeTab"],
   "action": {
-    "default_title": "比对报告差异导航（点击注入/重新扫描）"
+    "default_title": "比对报告差异导航（点击注入/重新扫描）",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "24": "icons/icon24.png",
+      "32": "icons/icon32.png"
+    }
   },
   "background": {
     "service_worker": "background.js"

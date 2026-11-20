@@ -64,13 +64,20 @@
 ```text
 diff-center-nav/
   manifest.json   清单（MV3）
+  icons/          扩展图标 16~128px
   background.js   点扩展图标时的兜底注入
   diff-core.js    报告表格识别与行数据抽取
   content.js      双栏渲染、联动滚动、导航、放大对话框
   content.css     双栏布局与高亮样式
+  STORE.md        商店上架材料（文案/权限说明/隐私政策）
   README.md
   *.html          示例比对报告（测试样本，扩展不会读取它们）
 ```
+
+## 上架到 Chrome Web Store
+
+素材已备齐：`icons/` 下是各尺寸图标，`store/` 下是 1280×800 截图与 440×280 宣传图。文案、权限理由、隐私政策模板都在 `STORE.md`，按里面的打包命令生成 zip 上传即可。
+
 
 ## 示例报告
 
