@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "比对报告差异居中导航",
+  "description": "识别 Beyond Compare HTML 比对报告左右两侧差异，居中显示差异，并支持上一个/下一个差异快速跳转。",
+  "version": "1.1.0",
+  "permissions": ["scripting", "activeTab"],
+  "action": {
+    "default_title": "比对报告差异导航（点击注入/重新扫描）"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["file:///*", "http://localhost/*", "http://127.0.0.1/*"],
+      "js": ["diff-core.js", "content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}

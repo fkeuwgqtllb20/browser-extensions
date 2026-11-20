@@ -8,6 +8,7 @@
 | --- | --- | --- |
 | 知识星球可折叠目录 | 在知识星球文章页自动生成可折叠目录，支持点击跳转和当前章节高亮。 | `extensions/zsxq-collapsible-toc/` |
 | 知识星球完整标题恢复 | 恢复被 `...` 截断的课程标题，保留学习序号，并支持跨两层页面提取课程视频 m3u8。 | `extensions/zsxq-title-restorer/` |
+| 比对报告差异居中导航 | 在 Beyond Compare 导出的 HTML 比对报告中识别左右差异，居中显示并支持上一个/下一个差异跳转。 | `extensions/diff-center-nav/` |
 
 ## 安装方式
 
@@ -40,6 +41,20 @@
 
 该扩展不使用嵌入式 iframe，以避免知识星球页面可能出现的 `login id is invalid` 错误。
 
+## 比对报告差异居中导航
+
+适用于 Beyond Compare 导出的 HTML 比对报告，直接用 Chrome 打开即可。
+
+1. 首次使用在 `chrome://extensions/` → 该扩展「详情」中打开「允许访问文件网址」；未开启时点一下工具栏扩展图标即可手动注入当前标签页。
+2. 页面顶部居中会出现胶囊形工具条，显示当前差异位置与显著差异数。
+3. 点击 `◀` / `▶` 或按 `Alt+↓` / `Alt+↑` 循环跳转，`Alt+Home` 回到第一处。
+4. 跳转时会把整段差异居中显示；差异块超过视口 80% 高度时改为贴近顶部。
+5. 当前差异块绘制为一个连续外框（首行上边、末行下边、左右各一条），块内统一浅黄底色；显著差异左侧标红线，非显著差异标灰线。
+6. 点击「仅看差异」可折叠连续 3 行以上的相同内容，点击「⋯ 已折叠 N 行」占位条展开；折叠前会冻结列宽，不会打乱表格排版。
+7. 双击任意差异行（或点工具条 `⤢`）弹出放大对照对话框：上下结构分别展示左右两侧完整内容，两侧横向滚动联动，超长行可横向查看；`Esc` 关闭。
+
+详细的适配范围与文件说明见 `extensions/diff-center-nav/README.md`。
+
 ## 目录约定
 
 ```text
@@ -52,6 +67,13 @@ extensions/
   zsxq-title-restorer/
     manifest.json
     background.js
+    content.js
+    content.css
+    README.md
+  diff-center-nav/
+    manifest.json
+    background.js
+    diff-core.js
     content.js
     content.css
     README.md

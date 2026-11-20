@@ -1,0 +1,437 @@
+/* ===== 顶部居中悬浮工具条 ===== */
+#bcdn-root,
+#bcdn-root * {
+  box-sizing: border-box;
+}
+
+#bcdn-root.bcdn-bar {
+  position: fixed;
+  z-index: 2147483646;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  padding: 4px;
+  color: #334155;
+  background: rgba(255, 255, 255, 0.97);
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  border-radius: 999px;
+  box-shadow: 0 6px 20px rgba(15, 23, 42, 0.14);
+  backdrop-filter: blur(10px);
+  font: 12px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  white-space: nowrap;
+  user-select: none;
+}
+
+#bcdn-root .bcdn-bar__main {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+#bcdn-root button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 26px;
+  padding: 0 9px;
+  color: #334155;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+#bcdn-root button:hover {
+  color: #1d4ed8;
+  background: rgba(59, 130, 246, 0.12);
+}
+
+#bcdn-root button:active {
+  transform: scale(0.96);
+}
+
+#bcdn-root .bcdn-step {
+  width: 26px;
+  padding: 0;
+  color: #1d4ed8;
+  font-size: 11px;
+}
+
+#bcdn-root .bcdn-icon {
+  width: 26px;
+  padding: 0;
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+#bcdn-root .bcdn-count {
+  min-width: 74px;
+  padding: 2px 8px;
+  color: #1d4ed8;
+  background: rgba(59, 130, 246, 0.1);
+  border-radius: 999px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+#bcdn-root .bcdn-sep {
+  width: 1px;
+  height: 16px;
+  margin: 0 3px;
+  background: rgba(148, 163, 184, 0.42);
+}
+
+#bcdn-root .bcdn-chip {
+  color: #475569;
+  font-weight: 500;
+  font-size: 11px;
+}
+
+#bcdn-root .bcdn-chip[aria-pressed="true"] {
+  color: #ffffff;
+  background: #2563eb;
+}
+
+#bcdn-root .bcdn-chip[aria-pressed="true"]:hover {
+  color: #ffffff;
+  background: #1d4ed8;
+}
+
+#bcdn-root .bcdn-pill {
+  display: none;
+}
+
+#bcdn-root.bcdn-bar--mini .bcdn-bar__main {
+  display: none;
+}
+
+#bcdn-root.bcdn-bar--mini {
+  padding: 3px;
+}
+
+#bcdn-root.bcdn-bar--mini .bcdn-pill {
+  display: inline-flex;
+  gap: 5px;
+  height: 28px;
+  padding: 0 12px;
+  color: #ffffff;
+  background: linear-gradient(135deg, #2563eb, #7c3aed);
+  border: none;
+  border-radius: 999px;
+  font-size: 12px;
+}
+
+#bcdn-root.bcdn-bar--mini .bcdn-pill b {
+  font-variant-numeric: tabular-nums;
+}
+
+#bcdn-root.bcdn-flash {
+  animation: bcdn-flash 0.45s ease;
+}
+
+@keyframes bcdn-flash {
+  0% { box-shadow: 0 6px 20px rgba(15, 23, 42, 0.14), 0 0 0 0 rgba(37, 99, 235, 0.5); }
+  100% { box-shadow: 0 6px 20px rgba(15, 23, 42, 0.14), 0 0 0 12px rgba(37, 99, 235, 0); }
+}
+
+/* ===== 差异行基础标记（细左线 + 彩色标记列） ===== */
+table.fc.bcdn-table tr.bcdn-diff > td:first-child {
+  box-shadow: inset 2px 0 0 #cbd5e1;
+}
+
+table.fc.bcdn-table tr.bcdn-diff.bcdn-sig > td:first-child {
+  box-shadow: inset 2px 0 0 #f87171;
+}
+
+table.fc.bcdn-table tr.bcdn-diff > td:nth-child(3) {
+  font-weight: 700;
+  color: #2563eb;
+}
+
+table.fc.bcdn-table tr.bcdn-diff.bcdn-sig > td:nth-child(3) {
+  color: #dc2626;
+}
+
+/* ===== 当前差异块：整块一个连续外框，而非逐行方框 ===== */
+table.fc.bcdn-table tr.bcdn-active > td {
+  background-color: #fff6d5 !important;
+}
+
+table.fc.bcdn-table tr.bcdn-active > td:first-child {
+  box-shadow: inset 3px 0 0 #2563eb;
+}
+
+table.fc.bcdn-table tr.bcdn-active > td:nth-child(5) {
+  box-shadow: inset -3px 0 0 #2563eb;
+}
+
+/* 顶/底边用背景渐变绘制，避免 border 引起的行高跳动 */
+table.fc.bcdn-table tr.bcdn-active-first > td {
+  background-image: linear-gradient(#2563eb, #2563eb);
+  background-repeat: no-repeat;
+  background-position: top;
+  background-size: 100% 2px;
+}
+
+table.fc.bcdn-table tr.bcdn-active-last > td {
+  background-image: linear-gradient(#2563eb, #2563eb);
+  background-repeat: no-repeat;
+  background-position: bottom;
+  background-size: 100% 2px;
+}
+
+/* 首行同时是末行（单行差异）时，上下边都要画 */
+table.fc.bcdn-table tr.bcdn-active-first.bcdn-active-last > td {
+  background-image: linear-gradient(#2563eb, #2563eb), linear-gradient(#2563eb, #2563eb);
+  background-position: top, bottom;
+  background-size: 100% 2px, 100% 2px;
+}
+
+/* ===== 折叠占位行 ===== */
+table.fc.bcdn-table tr.bcdn-collapsed-row > td {
+  padding: 2px 8px;
+  color: #64748b;
+  background: repeating-linear-gradient(
+    -45deg,
+    #f8fafc,
+    #f8fafc 6px,
+    #eef2f7 6px,
+    #eef2f7 12px
+  );
+  border: 1px solid #e2e8f0;
+  font-size: 11px;
+  text-align: center;
+  cursor: pointer;
+}
+
+table.fc.bcdn-table tr.bcdn-collapsed-row > td:hover {
+  color: #1d4ed8;
+  background: #e0e7ff;
+}
+
+table.fc.bcdn-table td {
+  word-break: break-word;
+}
+
+/* ===== 差异对照对话框 ===== */
+#bcdn-modal,
+#bcdn-modal * {
+  box-sizing: border-box;
+}
+
+#bcdn-modal.bcdn-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3vh 3vw;
+  font: 12px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+#bcdn-modal[hidden] {
+  display: none;
+}
+
+#bcdn-modal .bcdn-modal__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.42);
+  backdrop-filter: blur(2px);
+}
+
+#bcdn-modal .bcdn-modal__box {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(1500px, 100%);
+  height: 100%;
+  overflow: hidden;
+  background: #ffffff;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  border-radius: 14px;
+  box-shadow: 0 28px 80px rgba(15, 23, 42, 0.34);
+}
+
+#bcdn-modal .bcdn-modal__head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+  height: 42px;
+  padding: 0 8px 0 16px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.28);
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.09), rgba(124, 58, 237, 0.05));
+}
+
+#bcdn-modal .bcdn-modal__title {
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+#bcdn-modal .bcdn-modal__hint {
+  color: #94a3b8;
+  font-size: 11px;
+}
+
+#bcdn-modal .bcdn-modal__close {
+  margin-left: auto;
+  width: 28px;
+  height: 28px;
+  color: #475569;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+#bcdn-modal .bcdn-modal__close:hover {
+  color: #b91c1c;
+  background: rgba(239, 68, 68, 0.12);
+}
+
+/* 上下结构：两个面板各自等分高度，各自横向滚动 */
+#bcdn-modal .bcdn-modal__panes {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  padding: 10px;
+}
+
+#bcdn-modal .bcdn-pane {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid rgba(148, 163, 184, 0.34);
+  border-radius: 10px;
+}
+
+#bcdn-modal .bcdn-pane__head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  height: 26px;
+  padding: 0 10px;
+  background: #f8fafc;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.24);
+}
+
+#bcdn-modal .bcdn-pane__tag {
+  padding: 1px 7px;
+  color: #ffffff;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+#bcdn-modal .bcdn-pane__tag--left {
+  background: #dc2626;
+}
+
+#bcdn-modal .bcdn-pane__tag--right {
+  background: #2563eb;
+}
+
+#bcdn-modal .bcdn-pane__lines {
+  color: #64748b;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+#bcdn-modal .bcdn-code {
+  flex: 1;
+  min-height: 0;
+  padding: 4px 0;
+  overflow: auto;
+  font-family: Consolas, "Cascadia Mono", "Courier New", monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  background: #ffffff;
+  tab-size: 4;
+}
+
+#bcdn-modal .bcdn-code:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: -2px;
+}
+
+#bcdn-modal .bcdn-code__inner {
+  display: block;
+  width: max-content;
+}
+
+#bcdn-modal .bcdn-line {
+  display: flex;
+  align-items: flex-start;
+  min-width: max-content;
+  padding-right: 12px;
+  white-space: pre;
+}
+
+#bcdn-modal .bcdn-line:hover {
+  background: #f1f5f9;
+}
+
+#bcdn-modal .bcdn-ln {
+  flex: none;
+  width: 5ch;
+  padding-right: 10px;
+  color: #94a3b8;
+  text-align: right;
+  user-select: none;
+}
+
+#bcdn-modal .bcdn-txt {
+  flex: none;
+  padding-right: 8px;
+  color: #1f2937;
+  white-space: pre;
+}
+
+#bcdn-modal .bcdn-line:hover .bcdn-txt {
+  color: #0f172a;
+}
+
+#bcdn-modal .bcdn-code__empty {
+  padding: 16px;
+  color: #94a3b8;
+  font-family: inherit;
+  font-size: 12px;
+  text-align: center;
+}
+
+/* 窄屏改为左右并排，仍保持横向联动滚动 */
+@media (max-width: 760px) {
+  #bcdn-modal.bcdn-modal {
+    padding: 0;
+  }
+  #bcdn-modal .bcdn-modal__box {
+    border-radius: 0;
+    border: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #bcdn-root button {
+    transition: none;
+  }
+  #bcdn-root.bcdn-flash {
+    animation: none;
+  }
+}
