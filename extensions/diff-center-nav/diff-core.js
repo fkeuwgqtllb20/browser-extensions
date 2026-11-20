@@ -49,39 +49,64 @@
     return (cell?.textContent || '').replace(/\s+/g, '');
   }
 
-  // 把连续的差异行合并成“差异块”，用于一次跳转覆盖整段修改
-  function collectGroups(table) {
+  // 把报告表格抽成与 DOM 无关的行数据，供双栏视图和放大对话框共用。
+  // 同时把连续的差异行合并成“差异块”，用于一次跳转覆盖整段修改。
+  function describeReport(table) {
+    const rows = [];
     const groups = [];
     let active = null;
 
-    for (const row of table.rows) {
-      if (!isDiffRow(row)) {
+    for (const tr of table.rows) {
+      if (!hasSectionClass(tr) || tr.cells.length < 5) continue;
+
+      const row = {
+        index: rows.length,
+        leftNum: lineNumberOf(tr.cells[0]),
+        leftHTML: tr.cells[1].innerHTML,
+        leftClass: tr.cells[1].className,
+        marker: (tr.cells[2].textContent || '').trim(),
+        rightNum: lineNumberOf(tr.cells[3]),
+        rightHTML: tr.cells[4].innerHTML,
+        rightClass: tr.cells[4].className,
+        diff: isDiffRow(tr),
+        significant: isSignificantRow(tr)
+      };
+      rows.push(row);
+
+      if (!row.diff) {
         active = null;
         continue;
       }
       if (!active) {
         active = {
           index: groups.length,
-          rows: [],
+          start: row.index,
+          end: row.index,
           significant: false,
           leftLine: '',
           rightLine: ''
         };
         groups.push(active);
       }
-      active.rows.push(row);
-      if (!active.significant && isSignificantRow(row)) active.significant = true;
-      if (!active.leftLine) active.leftLine = lineNumberOf(row.cells[0]);
-      if (!active.rightLine) active.rightLine = lineNumberOf(row.cells[3]);
+      active.end = row.index;
+      if (row.significant) active.significant = true;
+      if (!active.leftLine && row.leftNum) active.leftLine = row.leftNum;
+      if (!active.rightLine && row.rightNum) active.rightLine = row.rightNum;
     }
 
-    return groups;
+    groups.forEach(group => {
+      group.count = group.end - group.start + 1;
+      if (!group.leftLine) {
+        const first = rows[group.start];
+        group.leftLine = first.leftNum || '—';
+      }
+    });
+
+    return { rows, groups };
   }
 
   window.__BCDN_CORE = {
     findReportTable,
-    collectGroups,
-    isDiffRow,
-    isDiffCell
+    describeReport
   };
 })();

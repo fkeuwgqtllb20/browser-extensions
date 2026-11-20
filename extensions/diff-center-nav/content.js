@@ -2,20 +2,23 @@
   'use strict';
 
   const core = window.__BCDN_CORE;
-  if (!core || document.getElementById('bcdn-root')) return;
+  if (!core || document.getElementById('bcdn-app')) return;
 
   const STORAGE_KEY = 'bcdn-prefs';
   const MIN_RUN_TO_COLLAPSE = 3;
+  const TOP_GUARD = 8;
 
+  let report = { rows: [], groups: [] };
   let table = null;
-  let groups = [];
   let current = -1;
   let collapsed = false;
-  let placeholders = [];
-  let ui = null;
+  let leftBody = null;
+  let rightBody = null;
+  let rowNodes = { left: [], right: [] };
+  let scrollLock = false;
   let modal = null;
   let modalParts = null;
-  let scrollLock = false;
+  let ui = null;
 
   const prefs = loadPrefs();
 
@@ -35,241 +38,322 @@
     }
   }
 
-  /* ---------------- 工具条 ---------------- */
+  function escapeHtml(text) {
+    return String(text).replace(/[&<>"]/g, ch => (
+      { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]
+    ));
+  }
 
-  function buildPanel() {
-    const root = document.createElement('div');
-    root.id = 'bcdn-root';
-    root.className = 'bcdn-bar';
-    root.innerHTML = `
-      <div class="bcdn-bar__main">
-        <button type="button" class="bcdn-step" data-act="prev" title="上一个差异 (Alt+↑)">◀</button>
-        <span class="bcdn-count" data-role="count" title="当前 / 总差异数">—</span>
-        <button type="button" class="bcdn-step" data-act="next" title="下一个差异 (Alt+↓)">▶</button>
-        <span class="bcdn-sep"></span>
-        <button type="button" class="bcdn-chip" data-act="collapse" aria-pressed="false" title="折叠连续相同的行">仅看差异</button>
-        <button type="button" class="bcdn-icon" data-act="zoom" title="放大对照当前差异（也可双击差异行）">⤢</button>
-        <button type="button" class="bcdn-icon" data-act="rescan" title="重新扫描差异">⟳</button>
-        <button type="button" class="bcdn-icon" data-act="minimize" title="收起">–</button>
+  function basename(path) {
+    const parts = String(path).split(/[\\/]/);
+    return parts[parts.length - 1] || path;
+  }
+
+  // 从报告顶部文字里取左右文件名，展示在标题栏，避免丢失上下文
+  function readFileNames() {
+    const text = document.body.textContent || '';
+    const left = text.match(/Left file:\s*(.+)/i);
+    const right = text.match(/Right file:\s*(.+)/i);
+    return {
+      left: left ? basename(left[1].trim()) : '左文件',
+      right: right ? basename(right[1].trim()) : '右文件'
+    };
+  }
+
+  /* ---------------- 视图搭建 ---------------- */
+
+  function build() {
+    const names = readFileNames();
+    const app = document.createElement('div');
+    app.id = 'bcdn-app';
+    app.innerHTML = `
+      <div class="bcdn-bar">
+        <div class="bcdn-bar__main">
+          <button type="button" class="bcdn-step" data-act="prev" title="上一个差异 (Alt+↑)">◀</button>
+          <span class="bcdn-count" data-role="count" title="当前 / 总差异数">—</span>
+          <button type="button" class="bcdn-step" data-act="next" title="下一个差异 (Alt+↓)">▶</button>
+          <span class="bcdn-sep"></span>
+          <button type="button" class="bcdn-chip" data-act="collapse" aria-pressed="false" title="折叠连续相同的行">仅看差异</button>
+          <button type="button" class="bcdn-icon" data-act="zoom" title="放大对照当前差异（也可双击差异行）">⤢</button>
+          <button type="button" class="bcdn-icon" data-act="minimize" title="收起工具条">–</button>
+        </div>
+        <button type="button" class="bcdn-pill" data-act="expand" title="展开工具条">
+          差异 <b data-role="mini">—</b>
+        </button>
       </div>
-      <button type="button" class="bcdn-pill" data-act="expand" title="展开差异导航">
-        差异 <b data-role="mini">—</b>
-      </button>
+      <div class="bcdn-split">
+        <section class="bcdn-pane bcdn-pane--left">
+          <header class="bcdn-pane__head">
+            <span class="bcdn-pane__tag bcdn-pane__tag--left">左</span>
+            <span class="bcdn-pane__file" title="${escapeHtml(names.left)}">${escapeHtml(names.left)}</span>
+            <span class="bcdn-pane__hint">滚轮/拖动任一侧，另一侧同步</span>
+          </header>
+          <div class="bcdn-body" data-role="left-body" tabindex="0"></div>
+        </section>
+        <div class="bcdn-divider" title="拖动调整左右宽度"></div>
+        <section class="bcdn-pane bcdn-pane--right">
+          <header class="bcdn-pane__head">
+            <span class="bcdn-pane__tag bcdn-pane__tag--right">右</span>
+            <span class="bcdn-pane__file" title="${escapeHtml(names.right)}">${escapeHtml(names.right)}</span>
+          </header>
+          <div class="bcdn-body" data-role="right-body" tabindex="0"></div>
+        </section>
+      </div>
     `;
 
-    root.querySelector('[data-act="collapse"]').setAttribute('aria-pressed', String(collapsed));
+    document.documentElement.appendChild(app);
+    ui = app;
 
-    root.addEventListener('click', event => {
+    leftBody = app.querySelector('[data-role="left-body"]');
+    rightBody = app.querySelector('[data-role="right-body"]');
+
+    app.querySelector('[data-act="collapse"]').setAttribute('aria-pressed', String(collapsed));
+
+    app.addEventListener('click', event => {
       const button = event.target.closest('button[data-act]');
       if (!button) return;
       const action = button.dataset.act;
       if (action === 'prev') go(-1);
       if (action === 'next') go(1);
-      if (action === 'rescan') rescan();
       if (action === 'collapse') setCollapsed(!collapsed);
-      if (action === 'zoom') openModal(groups[current >= 0 ? current : 0]);
-      if (action === 'minimize') root.classList.add('bcdn-bar--mini');
-      if (action === 'expand') root.classList.remove('bcdn-bar--mini');
+      if (action === 'zoom') openModal(current >= 0 ? current : 0);
+      if (action === 'minimize') app.classList.add('bcdn-app--mini');
+      if (action === 'expand') app.classList.remove('bcdn-app--mini');
     });
 
-    document.documentElement.appendChild(root);
-    ui = root;
+    // 双栏横向 + 纵向联动
+    leftBody.addEventListener('scroll', () => mirror(leftBody, rightBody));
+    rightBody.addEventListener('scroll', () => mirror(rightBody, leftBody));
+
+    // 双击差异行放大对照
+    leftBody.addEventListener('dblclick', onRowDoubleClick);
+    rightBody.addEventListener('dblclick', onRowDoubleClick);
+
+    buildDivider(app.querySelector('.bcdn-divider'));
+
+    document.body.classList.add('bcdn-has-app');
+    if (table) table.classList.add('bcdn-src-hidden');
   }
+
+  function buildDivider(divider) {
+    let dragging = false;
+
+    divider.addEventListener('pointerdown', event => {
+      dragging = true;
+      divider.setPointerCapture(event.pointerId);
+      document.body.classList.add('bcdn-dragging');
+    });
+
+    divider.addEventListener('pointermove', event => {
+      if (!dragging) return;
+      const split = divider.parentElement.getBoundingClientRect();
+      const ratio = (event.clientX - split.left) / split.width;
+      const clamped = Math.min(0.8, Math.max(0.2, ratio));
+      ui.style.setProperty('--bcdn-split', `${(clamped * 100).toFixed(2)}%`);
+    });
+
+    const stop = () => {
+      dragging = false;
+      document.body.classList.remove('bcdn-dragging');
+    };
+    divider.addEventListener('pointerup', stop);
+    divider.addEventListener('pointercancel', stop);
+  }
+
+  function mirror(from, to) {
+    if (scrollLock) return;
+    const sameX = Math.abs(to.scrollLeft - from.scrollLeft) < 1;
+    const sameY = Math.abs(to.scrollTop - from.scrollTop) < 1;
+    if (sameX && sameY) return;
+    scrollLock = true;
+    to.scrollLeft = from.scrollLeft;
+    to.scrollTop = from.scrollTop;
+    requestAnimationFrame(() => { scrollLock = false; });
+  }
+
+  /* ---------------- 行渲染 ---------------- */
+
+  function cellClasses(row, side) {
+    const cls = side === 'left' ? row.leftClass : row.rightClass;
+    const classes = ['bcdn-cell'];
+    if (row.diff) classes.push('bcdn-cell--diff');
+    if (row.significant) classes.push('bcdn-cell--sig');
+    if (/\bTextItem(?:Sig|Insig)Add\b/.test(cls || '')) classes.push('bcdn-cell--add');
+    if (/\bTextItem(?:Sig|Insig)Del\b/.test(cls || '')) classes.push('bcdn-cell--del');
+    if (/\bTextItem(?:Sig|Insig)Orphan\b/.test(cls || '')) classes.push('bcdn-cell--orphan');
+    return classes.join(' ');
+  }
+
+  function makeRow(row, side) {
+    const el = document.createElement('div');
+    el.className = 'bcdn-row';
+    el.dataset.row = String(row.index);
+    el.dataset.side = side;
+
+    const num = document.createElement('span');
+    num.className = 'bcdn-ln';
+    num.textContent = (side === 'left' ? row.leftNum : row.rightNum) || '';
+
+    const code = document.createElement('span');
+    code.className = cellClasses(row, side);
+    // 复用原报告的 HTML，保留语法高亮与 &nbsp; 缩进
+    code.innerHTML = (side === 'left' ? row.leftHTML : row.rightHTML) || '&nbsp;';
+
+    el.append(num, code);
+    return el;
+  }
+
+  function makeGap(count) {
+    const el = document.createElement('div');
+    el.className = 'bcdn-row bcdn-row--gap';
+    el.innerHTML = `<span class="bcdn-gap">⋯ 已折叠 ${count} 行相同内容</span>`;
+    return el;
+  }
+
+  // 生成“渲染计划”：折叠时把成段的相同行替换为一个占位条
+  function planRows() {
+    const plan = [];
+    if (!collapsed) {
+      report.rows.forEach(row => plan.push({ type: 'row', row }));
+      return plan;
+    }
+    let run = 0;
+    let runStart = null;
+    report.rows.forEach(row => {
+      if (row.diff) {
+        if (run) {
+          if (run >= MIN_RUN_TO_COLLAPSE) plan.push({ type: 'gap', count: run });
+          else for (let i = 0; i < run; i++) plan.push({ type: 'row', row: report.rows[runStart + i] });
+          run = 0;
+        }
+        plan.push({ type: 'row', row });
+        return;
+      }
+      if (!run) runStart = row.index;
+      run += 1;
+    });
+    if (run) {
+      if (run >= MIN_RUN_TO_COLLAPSE) plan.push({ type: 'gap', count: run });
+      else for (let i = 0; i < run; i++) plan.push({ type: 'row', row: report.rows[runStart + i] });
+    }
+    return plan;
+  }
+
+  function render() {
+    const plan = planRows();
+    const leftFrag = document.createDocumentFragment();
+    const rightFrag = document.createDocumentFragment();
+    rowNodes = { left: new Array(report.rows.length), right: new Array(report.rows.length) };
+
+    plan.forEach(item => {
+      if (item.type === 'gap') {
+        leftFrag.appendChild(makeGap(item.count));
+        rightFrag.appendChild(makeGap(item.count));
+        return;
+      }
+      const leftEl = makeRow(item.row, 'left');
+      const rightEl = makeRow(item.row, 'right');
+      rowNodes.left[item.row.index] = leftEl;
+      rowNodes.right[item.row.index] = rightEl;
+      leftFrag.appendChild(leftEl);
+      rightFrag.appendChild(rightEl);
+    });
+
+    const keepTop = leftBody.scrollTop;
+    leftBody.textContent = '';
+    rightBody.textContent = '';
+    leftBody.appendChild(leftFrag);
+    rightBody.appendChild(rightFrag);
+    leftBody.scrollTop = keepTop;
+    rightBody.scrollTop = keepTop;
+
+    applyActiveClasses();
+  }
+
+  function applyActiveClasses() {
+    for (const side of ['left', 'right']) {
+      document.querySelectorAll('.bcdn-row--active').forEach(el => {
+        el.classList.remove('bcdn-row--active', 'bcdn-row--active-first', 'bcdn-row--active-last');
+      });
+      rowNodes[side] = rowNodes[side] || [];
+    }
+    const group = report.groups[current];
+    if (!group) return;
+    for (const side of ['left', 'right']) {
+      for (let i = group.start; i <= group.end; i++) {
+        const el = rowNodes[side][i];
+        if (!el) continue;
+        el.classList.add('bcdn-row--active');
+        if (i === group.start) el.classList.add('bcdn-row--active-first');
+        if (i === group.end) el.classList.add('bcdn-row--active-last');
+      }
+    }
+  }
+
+  /* ---------------- 导航 ---------------- */
 
   function setCollapsed(next) {
     collapsed = next;
     const chip = ui?.querySelector('[data-act="collapse"]');
     if (chip) chip.setAttribute('aria-pressed', String(collapsed));
     savePrefs();
-    applyCollapse();
-    if (current >= 0 && groups[current]) centerGroup(groups[current]);
+    render();
+    if (current >= 0) centerGroup(report.groups[current]);
   }
-
-  /* ---------------- 差异扫描 ---------------- */
-
-  function rescan() {
-    expandAll();
-    groups = core.collectGroups(table);
-    groups.forEach((group, index) => {
-      group.rows.forEach(row => {
-        row.dataset.bcdnGroup = String(index);
-        row.classList.add('bcdn-diff');
-        row.classList.toggle('bcdn-sig', group.significant);
-        row.classList.remove('bcdn-active', 'bcdn-active-first', 'bcdn-active-last');
-      });
-    });
-    if (current >= groups.length) current = groups.length - 1;
-    applyCollapse();
-    updateCounter();
-    if (current >= 0 && groups[current]) setActive(current, false);
-    else current = -1;
-  }
-
-  function applyCollapse() {
-    expandAll();
-    if (!collapsed || groups.length === 0) {
-      updateCounter();
-      return;
-    }
-    const runs = collectRuns();
-    if (runs.length) {
-      // 先按展开状态量好列宽再隐藏行，否则浏览器会按剩余可见行重排列宽
-      freezeColumnWidths();
-      runs.forEach(collapseRun);
-    }
-    updateCounter();
-  }
-
-  function collectRuns() {
-    const runs = [];
-    let run = [];
-    for (const row of [...table.rows]) {
-      if (row.classList.contains('bcdn-diff')) {
-        if (run.length) runs.push(run.splice(0));
-        continue;
-      }
-      run.push(row);
-    }
-    if (run.length) runs.push(run);
-    return runs;
-  }
-
-  function freezeColumnWidths() {
-    if (!table || table.querySelector('colgroup.bcdn-cols')) return;
-    const ref = [...table.rows].find(row => !row.hidden && row.cells.length === 5);
-    if (!ref) return;
-    const widths = [...ref.cells].map(cell => cell.getBoundingClientRect().width);
-    const total = widths.reduce((sum, width) => sum + width, 0);
-    if (!total) return;
-
-    // 必须用绝对像素并显式锁定表格总宽：
-    // 百分比列宽配 table-layout:fixed 会让整表收缩到视口宽，
-    // 在超宽报告（列宽上千 px）上会把内容压扁。
-    const colgroup = document.createElement('colgroup');
-    colgroup.className = 'bcdn-cols';
-    widths.forEach(width => {
-      const col = document.createElement('col');
-      col.style.width = `${Math.round(width)}px`;
-      colgroup.appendChild(col);
-    });
-    table.insertBefore(colgroup, table.firstChild);
-    table.style.width = `${Math.round(total)}px`;
-    table.style.tableLayout = 'fixed';
-  }
-
-  function unfreezeColumnWidths() {
-    if (!table) return;
-    table.querySelector('colgroup.bcdn-cols')?.remove();
-    table.style.tableLayout = '';
-    table.style.width = '';
-  }
-
-  function collapseRun(rows) {
-    if (rows.length < MIN_RUN_TO_COLLAPSE) return;
-    const holder = document.createElement('tr');
-    holder.className = 'bcdn-collapsed-row';
-    const cell = document.createElement('td');
-    cell.colSpan = 5;
-    cell.textContent = `⋯ 已折叠 ${rows.length} 行相同内容 · 点击展开`;
-    cell.addEventListener('click', () => expandRun(holder, rows));
-    holder.appendChild(cell);
-    rows.forEach(row => { row.hidden = true; });
-    rows[rows.length - 1].after(holder);
-    placeholders.push({ holder, rows });
-  }
-
-  function expandRun(holder, rows) {
-    rows.forEach(row => { row.hidden = false; });
-    holder.remove();
-    placeholders = placeholders.filter(item => item.holder !== holder);
-  }
-
-  function expandAll() {
-    placeholders.forEach(({ holder }) => holder.remove());
-    placeholders = [];
-    if (!table) return;
-    for (const row of table.rows) {
-      if (row.hidden) row.hidden = false;
-    }
-    unfreezeColumnWidths();
-  }
-
-  /* ---------------- 跳转与高亮 ---------------- */
 
   function go(step) {
-    if (groups.length === 0) return;
+    if (report.groups.length === 0) return;
     if (current < 0) {
-      goTo(step > 0 ? 0 : groups.length - 1);
+      goTo(step > 0 ? 0 : report.groups.length - 1);
       return;
     }
-    goTo((current + step + groups.length) % groups.length);
+    goTo((current + step + report.groups.length) % report.groups.length);
   }
 
   function goTo(index) {
-    if (groups.length === 0) return;
-    setActive(Math.max(0, Math.min(index, groups.length - 1)), true);
-  }
-
-  function setActive(index, shouldScroll) {
-    if (groups[current]) {
-      groups[current].rows.forEach(row => {
-        row.classList.remove('bcdn-active', 'bcdn-active-first', 'bcdn-active-last');
-      });
-    }
-    current = index;
-    const group = groups[index];
-    if (!group) return;
-
-    group.rows.forEach(row => row.classList.add('bcdn-active'));
-    group.rows[0].classList.add('bcdn-active-first');
-    group.rows[group.rows.length - 1].classList.add('bcdn-active-last');
-
+    if (report.groups.length === 0) return;
+    current = Math.max(0, Math.min(index, report.groups.length - 1));
+    applyActiveClasses();
     updateCounter();
-    if (shouldScroll) {
-      centerGroup(group);
-      pulsePanel();
-    }
+    centerGroup(report.groups[current]);
   }
 
   function centerGroup(group) {
-    const visible = group.rows.filter(row => !row.hidden);
-    if (visible.length === 0) return;
-    const first = visible[0].getBoundingClientRect();
-    const last = visible[visible.length - 1].getBoundingClientRect();
-    const height = last.bottom - first.top;
-    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    const behavior = reduce ? 'auto' : 'smooth';
-    const topGuard = 72;
-    const offset = height > window.innerHeight * 0.8
-      ? first.top - topGuard
-      : (first.top + last.bottom) / 2 - window.innerHeight / 2;
-    window.scrollTo({ top: Math.max(0, window.scrollY + offset), behavior });
+    const target = rowNodes.left[group.start];
+    if (!target) return;
+    const lastEl = rowNodes.left[group.end] || target;
+    const offsetTop = target.offsetTop;
+    const height = lastEl.offsetTop + lastEl.offsetHeight - offsetTop;
+    const viewH = leftBody.clientHeight;
+
+    // 一块装不下时贴顶显示，否则整体垂直居中
+    const top = height > viewH * 0.8
+      ? offsetTop - TOP_GUARD
+      : offsetTop - (viewH - height) / 2;
+
+    const behavior = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+    const value = Math.max(0, top);
+    leftBody.scrollTo({ top: value, behavior });
+    rightBody.scrollTo({ top: value, behavior });
   }
 
   function updateCounter() {
     if (!ui) return;
     const counter = ui.querySelector('[data-role="count"]');
     const mini = ui.querySelector('[data-role="mini"]');
-    const significant = groups.filter(group => group.significant).length;
-
-    if (groups.length === 0) {
+    const total = report.groups.length;
+    if (total === 0) {
       counter.textContent = '无差异';
       mini.textContent = '无';
       return;
     }
-    const position = current >= 0 ? `${current + 1}/${groups.length}` : `共 ${groups.length}`;
+    const significant = report.groups.filter(group => group.significant).length;
+    const position = current >= 0 ? `${current + 1}/${total}` : `共 ${total}`;
     counter.textContent = `${position} · 显著 ${significant}`;
     mini.textContent = position;
   }
 
-  function pulsePanel() {
-    if (!ui) return;
-    ui.classList.remove('bcdn-flash');
-    void ui.offsetWidth;
-    ui.classList.add('bcdn-flash');
-  }
-
-  /* ---------------- 双击放大对照 ---------------- */
+  /* ---------------- 放大对照 ---------------- */
 
   function buildModal() {
     modal = document.createElement('div');
@@ -281,7 +365,7 @@
       <div class="bcdn-modal__box" role="dialog" aria-modal="true" aria-label="差异对照">
         <div class="bcdn-modal__head">
           <span class="bcdn-modal__title" data-role="title">差异对照</span>
-          <span class="bcdn-modal__hint">左右/上下横向联动滚动 · Esc 关闭</span>
+          <span class="bcdn-modal__hint">上下结构 · 横向联动滚动 · Esc 关闭 · Alt+↑/↓ 切换差异</span>
           <button type="button" class="bcdn-modal__close" data-act="close" title="关闭 (Esc)">✕</button>
         </div>
         <div class="bcdn-modal__panes">
@@ -315,41 +399,40 @@
       rightLines: modal.querySelector('[data-role="right-lines"]')
     };
 
-    // 横向联动：滚任意一边，另一边跟着滚；纵向各自独立
-    const { leftCode, rightCode } = modalParts;
-    leftCode.addEventListener('scroll', () => mirrorScroll(leftCode, rightCode));
-    rightCode.addEventListener('scroll', () => mirrorScroll(rightCode, leftCode));
+    modalParts.leftCode.addEventListener('scroll', () => mirror(modalParts.leftCode, modalParts.rightCode));
+    modalParts.rightCode.addEventListener('scroll', () => mirror(modalParts.rightCode, modalParts.leftCode));
 
     document.documentElement.appendChild(modal);
 
-    // 窗口尺寸变化后两侧可用宽度会变，需重新对齐滚动范围
     window.addEventListener('resize', () => {
       if (!modal.hidden) alignScrollRanges();
     });
   }
 
-  function mirrorScroll(from, to) {
-    if (scrollLock || to.scrollLeft === from.scrollLeft) return;
-    scrollLock = true;
-    to.scrollLeft = from.scrollLeft;
-    requestAnimationFrame(() => { scrollLock = false; });
+  function lineRange(numbers) {
+    const valid = numbers.filter(Boolean);
+    if (valid.length === 0) return '—';
+    if (valid.length === 1) return valid[0];
+    return `${valid[0]}–${valid[valid.length - 1]}`;
   }
 
-  function lineCellsOf(row) {
-    return {
-      leftNum: (row.cells[0].textContent || '').trim(),
-      leftText: row.cells[1].textContent || '',
-      rightNum: (row.cells[3].textContent || '').trim(),
-      rightText: row.cells[4].textContent || ''
-    };
+  // 报告里空行写作 &nbsp;，剥离标签与实体后再判断是否真的没内容
+  function isBlankHtml(html) {
+    return String(html || '')
+      .replace(/<[^>]*>/g, '')
+      .replace(/&nbsp;|&#160;/gi, '')
+      .trim().length === 0;
   }
 
-  function renderSide(container, lines, numberKey, textKey) {
+  function renderModalSide(container, rows, side) {
     container.textContent = '';
     const inner = document.createElement('div');
     inner.className = 'bcdn-code__inner';
 
-    const hasText = lines.some(line => line[textKey].trim().length > 0);
+    const htmlKey = side === 'left' ? 'leftHTML' : 'rightHTML';
+    const numKey = side === 'left' ? 'leftNum' : 'rightNum';
+    const hasText = rows.some(row => !isBlankHtml(row[htmlKey]));
+
     if (!hasText) {
       const empty = document.createElement('div');
       empty.className = 'bcdn-code__empty';
@@ -360,24 +443,22 @@
     }
 
     const fragment = document.createDocumentFragment();
-    lines.forEach(line => {
-      const row = document.createElement('div');
-      row.className = 'bcdn-line';
+    rows.forEach(row => {
+      const el = document.createElement('div');
+      el.className = 'bcdn-line';
       const num = document.createElement('span');
       num.className = 'bcdn-ln';
-      num.textContent = line[numberKey] || '';
-      const text = document.createElement('span');
-      text.className = 'bcdn-txt';
-      // 空行补一个空格，撑住行高，保证两侧行对齐
-      text.textContent = line[textKey] || ' ';
-      row.append(num, text);
-      fragment.appendChild(row);
+      num.textContent = row[numKey] || '';
+      const code = document.createElement('span');
+      code.className = cellClasses(row, side);
+      code.innerHTML = row[htmlKey] || '&nbsp;';
+      el.append(num, code);
+      fragment.appendChild(el);
     });
     inner.appendChild(fragment);
     container.appendChild(inner);
   }
 
-  // 两侧内容宽度取一致，否则短的一侧没有可滚动范围，横向联动会失效
   function alignScrollRanges() {
     const { leftCode, rightCode } = modalParts;
     [leftCode, rightCode].forEach(code => {
@@ -392,19 +473,20 @@
     });
   }
 
-  function openModal(group) {
+  function openModal(groupIndex) {
     if (!modal) buildModal();
-    if (!group || group.rows.length === 0) return;
+    const group = report.groups[groupIndex];
+    if (!group) return;
 
-    const lines = group.rows.map(lineCellsOf);
-    const leftSpan = lineRange(lines.map(line => line.leftNum));
-    const rightSpan = lineRange(lines.map(line => line.rightNum));
+    const rows = report.rows.slice(group.start, group.end + 1);
+    const leftSpan = lineRange(rows.map(row => row.leftNum));
+    const rightSpan = lineRange(rows.map(row => row.rightNum));
 
     modalParts.title.textContent = `差异对照 · 左 ${leftSpan} · 右 ${rightSpan}`;
     modalParts.leftLines.textContent = leftSpan;
     modalParts.rightLines.textContent = rightSpan;
-    renderSide(modalParts.leftCode, lines, 'leftNum', 'leftText');
-    renderSide(modalParts.rightCode, lines, 'rightNum', 'rightText');
+    renderModalSide(modalParts.leftCode, rows, 'left');
+    renderModalSide(modalParts.rightCode, rows, 'right');
 
     modal.hidden = false;
     alignScrollRanges();
@@ -414,24 +496,18 @@
     modalParts.rightCode.scrollTop = 0;
   }
 
-  function lineRange(numbers) {
-    const valid = numbers.filter(Boolean);
-    if (valid.length === 0) return '—';
-    if (valid.length === 1) return valid[0];
-    return `${valid[0]}–${valid[valid.length - 1]}`;
-  }
-
   function closeModal() {
     if (modal) modal.hidden = true;
   }
 
-  function onDoubleClick(event) {
-    const row = event.target.closest('tr');
-    if (!row || !table.contains(row) || row.classList.contains('bcdn-collapsed-row')) return;
-    const index = row.dataset.bcdnGroup;
-    if (index === undefined) return;
+  function onRowDoubleClick(event) {
+    const rowEl = event.target.closest('.bcdn-row[data-row]');
+    if (!rowEl) return;
+    const index = Number(rowEl.dataset.row);
+    const group = report.groups.find(g => index >= g.start && index <= g.end);
+    if (!group) return;
     event.preventDefault();
-    openModal(groups[Number(index)]);
+    openModal(group.index);
   }
 
   /* ---------------- 事件 ---------------- */
@@ -444,10 +520,9 @@
         return;
       }
       if (event.altKey && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
-        // 对话框内也可直接切换上下一个差异
         event.preventDefault();
         go(event.key === 'ArrowDown' ? 1 : -1);
-        if (groups[current]) openModal(groups[current]);
+        if (report.groups[current]) openModal(current);
         return;
       }
     }
@@ -466,13 +541,17 @@
   function start() {
     table = core.findReportTable();
     if (!table) return;
-    table.classList.add('bcdn-table');
+    report = core.describeReport(table);
+    if (report.rows.length === 0) return;
+
     collapsed = Boolean(prefs.collapsed);
-    buildPanel();
-    buildModal();
-    rescan();
-    table.addEventListener('dblclick', onDoubleClick);
+    build();
+    render();
+    updateCounter();
     document.addEventListener('keydown', onKeydown, true);
+    window.addEventListener('resize', () => {
+      if (modal && !modal.hidden) alignScrollRanges();
+    });
   }
 
   if (document.readyState === 'loading') {
